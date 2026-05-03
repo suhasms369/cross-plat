@@ -1,0 +1,41 @@
+# meshkvm config — copy to ~/.config/meshkvm/config.toml
+# Run `meshkvm --keygen` to generate your identity key and print your pubkey
+
+[node]
+name = "linux-box"                              # must match your name in topology.order
+identity_key = "/home/user/.config/meshkvm/identity.key"
+control_port = 24801                            # TCP — auth, gossip, key rotation
+data_port    = 24802                            # UDP — mouse/keyboard events
+
+# Manually distribute this to ALL nodes via USB or secure copy.
+# Generate once: openssl rand -hex 32
+mesh_psk = "REPLACE_WITH_64_HEX_CHARS_FROM_openssl_rand_hex_32"
+
+[session]
+rotation_interval_secs  = 86400   # rotate session key every 24h
+heartbeat_interval_ms   = 500     # ping peers every 500ms
+heartbeat_miss_threshold = 3      # 3 missed pings → mark peer DOWN (~1.5s)
+
+[topology]
+# Linear order left → right. Each node determines its own neighbors from this list.
+order = ["linux-box", "windows-box", "macbook"]
+
+[display]
+width  = 1920
+height = 1080
+edge_threshold_px = 5   # pixels from edge to trigger handoff
+
+# One [[peers]] block per OTHER node in the mesh.
+# Get pubkey by running `meshkvm --keygen` on each machine.
+
+[[peers]]
+name    = "windows-box"
+mac     = "11:22:33:44:55:66"
+address = "192.168.1.100"
+pubkey  = "HEX_ED25519_VERIFYING_KEY_OF_WINDOWS_BOX"
+
+[[peers]]
+name    = "macbook"
+mac     = "aa:bb:cc:dd:ee:ff"
+address = "192.168.1.101"
+pubkey  = "HEX_ED25519_VERIFYING_KEY_OF_MACBOOK"
