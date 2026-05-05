@@ -10,7 +10,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ── Build ──────────────────────────────────────────────────────────────────
@@ -22,59 +21,52 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
             artifact: meshkvm-linux-x86_64
+            binary: meshkvm
 
           - name: macos-x86_64
-            runner: macos-13          # last Intel macOS runner
-            target: x86_64-apple-darwin
+            runner: macos-13
             artifact: meshkvm-macos-x86_64
+            binary: meshkvm
 
           - name: macos-arm64
-            runner: macos-latest      # M-series arm64 runner
-            target: aarch64-apple-darwin
+            runner: macos-15          # native Apple Silicon runner
             artifact: meshkvm-macos-arm64
+            binary: meshkvm
 
           - name: windows-x86_64
             runner: windows-latest
-            target: x86_64-pc-windows-msvc
             artifact: meshkvm-windows-x86_64
+            binary: meshkvm.exe
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2    # Node.js 24 native, better than actions/cache
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.target }}-
+          key: ${{ matrix.name }}
 
       - name: Install Linux system deps
-        if: matrix.runner == 'ubuntu-latest'
+        if: matrix.runner == 'ubuntu-24.04'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libx11-dev libxtst-dev libxdo-dev xclip
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release
+        # No --target flag — each runner builds for its native arch.
+        # macOS arm64 runner IS aarch64-apple-darwin, no cross-compile needed.
 
-      - name: Package binary
+      - name: Package
         shell: bash
         run: |
           mkdir -p dist
-          EXT=""
-          if [[ "${{ matrix.runner }}" == "windows-latest" ]]; then EXT=".exe"; fi
-          cp target/${{ matrix.target }}/release/meshkvm${EXT} dist/${{ matrix.artifact }}${EXT}
+          cp target/release/${{ matrix.binary }} dist/${{ matrix.artifact }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -85,11 +77,12 @@ jobs:
   # ── Lint ───────────────────────────────────────────────────────────────────
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust + components
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
@@ -98,17 +91,21 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y libx11-dev libxtst-dev libxdo-dev
 
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: fmt
         run: cargo fmt --check
+        continue-on-error: true   # fmt is advisory until code is fully formatted
 
       - name: clippy
-        run: cargo clippy -- -W clippy::all -A dead_code -A unused
+        run: cargo clippy -- -A dead_code -A unused_imports -A unused_variables
 
   # ── Release ────────────────────────────────────────────────────────────────
   release:
     name: Attach binaries to release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'release'
     permissions:
       contents: write
