@@ -31,7 +31,7 @@ mac_address = "1.1"
 
 # Input — cross-platform capture and injection
 rdev  = "0.5"
-enigo = "0.0.14"
+enigo = "0.2"
 
 # Clipboard
 
