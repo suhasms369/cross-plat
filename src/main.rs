@@ -18,7 +18,7 @@ use tracing::info;
 use config::Config;
 use crypto::identity::Identity;
 use input::capture::start_capture;
-use input::inject::Injector;
+use input::inject::spawn_injector;
 use input::clipboard::Clipboard;
 
 use network::gossip::{GossipTable, run_gossip_loop};
@@ -224,8 +224,8 @@ async fn main() -> Result<()> {
     let (input_tx, mut input_rx) = mpsc::channel::<DataMsg>(1024);
     start_capture(input_tx);
 
-    let injector     = Arc::new(Mutex::new(Injector::new().context("Injector init")?));
-    let (rc, cc, pc, ptxc) = (router.clone(), config.clone(), peers.clone(), peer_tx.clone());
+    let injector = spawn_injector().context("Injector init")?;
+    let (rc, cc, pc, ptxc, inj_input) = (router.clone(), config.clone(), peers.clone(), peer_tx.clone(), injector.clone());
 
     tokio::spawn(async move {
         while let Some(msg) = input_rx.recv().await {
@@ -284,7 +284,7 @@ async fn main() -> Result<()> {
                         if let Some(cipher) = &s.cipher {
                             if let Ok(plain) = cipher.decrypt(data) {
                                 if let Ok(msg) = serde_json::from_slice::<DataMsg>(&plain) {
-                                    let _ = inj.lock().await.inject(msg);
+                                    inj.inject(msg);
                                     break;
                                 }
                             }
