@@ -1,0 +1,5 @@
+'EOF'
+/target
+*.key
+*.pem
+EOF
