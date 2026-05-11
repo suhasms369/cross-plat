@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{Mutex, mpsc};
 use tracing::info;
 
@@ -220,12 +220,15 @@ async fn main() -> Result<()> {
         });
     }
 
+    // ── UDP send socket ──────────────────────────────────────────────────────────
+    let udp_send = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+
     // ── Input capture → route → forward ──────────────────────────────────────
     let (input_tx, mut input_rx) = mpsc::channel::<DataMsg>(1024);
     start_capture(input_tx);
 
     let injector = spawn_injector().context("Injector init")?;
-    let (rc, cc, pc, ptxc, inj_input) = (router.clone(), config.clone(), peers.clone(), peer_tx.clone(), injector.clone());
+    let (rc, cc, pc, ptxc, inj_input, udp_fwd) = (router.clone(), config.clone(), peers.clone(), peer_tx.clone(), injector.clone(), udp_send.clone());
 
     tokio::spawn(async move {
         while let Some(msg) = input_rx.recv().await {
@@ -241,7 +244,7 @@ async fn main() -> Result<()> {
                                     from_node:     cc.node.name.clone(),
                                     edge:          edge.into(),
                                     cursor_y_norm: y / cc.display.height as f64,
-                                }, &pc, &ptxc).await;
+                                }, &pc, &cc, &udp_fwd).await;
                             }
                         }
                     }
@@ -255,11 +258,11 @@ async fn main() -> Result<()> {
                                 to_node:       cc.node.name.clone(),
                                 edge:          edge.into(),
                                 cursor_y_norm: y / cc.display.height as f64,
-                            }, &pc, &ptxc).await;
+                            }, &pc, &cc, &udp_fwd).await;
                             continue;
                         }
                     }
-                    send_data(&peer, msg, &pc, &ptxc).await;
+                    send_data(&peer, msg, &pc, &cc, &udp_fwd).await;
                 }
                 Block => {}
             }
@@ -306,27 +309,44 @@ async fn main() -> Result<()> {
 fn detect_edge(x: f64, _y: f64, cfg: &Config) -> Option<&'static str> {
     let t = cfg.display.edge_threshold_px as f64;
     let w = cfg.display.width as f64;
-    if x <= t     { return Some("left");  }
-    if x >= w - t { return Some("right"); }
+    // Use a wider deadzone (3x threshold) to prevent flicker at edges
+    if x <= t           { return Some("left");  }
+    if x >= w - t       { return Some("right"); }
     None
+}
+
+/// Once handed off, only return control when cursor reaches the OPPOSITE edge
+/// with a larger deadzone to prevent immediate bounce-back.
+fn detect_return_edge(x: f64, _y: f64, cfg: &Config, active_edge: &str) -> bool {
+    let w   = cfg.display.width as f64;
+    let pad = (cfg.display.edge_threshold_px * 5) as f64; // 5x deadzone for return
+    match active_edge {
+        "right" => x <= pad,          // came from right, return when hitting left side
+        "left"  => x >= w - pad,      // came from left, return when hitting right side
+        _       => false,
+    }
 }
 
 async fn send_data(
     peer:    &str,
     msg:     DataMsg,
     peers:   &Arc<Mutex<HashMap<String, SharedPeerState>>>,
-    peer_tx: &Arc<Mutex<HashMap<String, PeerSender>>>,
+    config:  &Config,
+    udp_tx:  &Arc<UdpSocket>,
 ) {
     let cipher = {
         let m = peers.lock().await;
         match m.get(peer) { Some(ps) => ps.lock().await.cipher.clone(), None => return }
     };
+    // Find peer address from config
+    let peer_addr = match config.peer_by_name(peer) {
+        Some(p) => format!("{}:{}", p.address, config.node.data_port),
+        None => return,
+    };
     if let Some(c) = cipher {
         if let Ok(json) = serde_json::to_vec(&msg) {
             if let Ok(enc) = c.encrypt(&json) {
-                if let Some(tx) = peer_tx.lock().await.get(peer) {
-                    let _ = tx.try_send(enc);
-                }
+                let _ = udp_tx.send_to(&enc, &peer_addr).await;
             }
         }
     }
