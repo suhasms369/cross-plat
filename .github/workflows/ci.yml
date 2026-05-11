@@ -25,10 +25,7 @@ jobs:
             artifact: meshkvm-linux-x86_64
             binary: meshkvm
 
-          - name: macos-x86_64
-            runner: macos-13
-            artifact: meshkvm-macos-x86_64
-            binary: meshkvm
+          
 
           - name: macos-arm64
             runner: macos-15          # native Apple Silicon runner
