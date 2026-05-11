@@ -5,6 +5,29 @@
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 ![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)
 
+## Known Bugs — Help Wanted
+
+The core is working (auth, encryption, mesh routing, cross-platform CI) but these need fixing:
+
+### 🐛 Input not suppressed on sender [`good first issue`]
+When controlling a remote machine, local OS still processes mouse/keyboard events causing duplication.
+**Fix:** Switch `rdev::listen` → `rdev::grab` in `src/input/capture.rs`. Pass `Arc<AtomicBool>` 
+from router to suppress events when `is_remote = true`.
+
+### 🐛 Mac → Windows direction broken [`good first issue`]  
+One-way only currently. Likely display resolution mismatch in config — MacBook is 1440x900 
+logical pixels not 1920x1080. Fix edge detection in `src/main.rs detect_edge()`.
+
+### 🐛 Key mapping incorrect across platforms [`help wanted`]
+rdev key names don't map 1:1 to enigo key names on all platforms.
+Fix the lookup table in `src/input/inject.rs name_to_key()`.
+
+### 💡 Nice to have
+- mDNS auto-discovery instead of static IPs in config
+- TUI status display (peer status, active node, key rotation countdown)  
+- Wayland capture support (`libei` / `wlr-input-inhibitor`)
+- macOS Universal Binary (lipo x86_64 + arm64)
+
 **Secure P2P software KVM** — share your mouse, keyboard, and clipboard across Linux, macOS, and Windows machines on a LAN. No server, no cloud, no subscription.
 
 Move your cursor off the edge of one screen and it appears on the next — just like a hardware KVM, but in software with a proper security model built in from scratch.
